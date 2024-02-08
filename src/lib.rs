@@ -1,46 +1,9 @@
-use std::{
-    fmt::{self, Display, Formatter},
-    net::{IpAddr, Ipv4Addr, Ipv6Addr},
+use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
+
+use openssl::{
+    error::ErrorStack,
+    symm::{Cipher, Crypter, Mode},
 };
-
-// FEAT: LATER: add support for RustCrypto's AES Implementation as a backend via feature flag
-use openssl::symm::{Cipher, Crypter, Mode};
-
-#[derive(Debug)]
-pub enum CryptoPAnError {
-    CipherError(CipherError),
-}
-
-impl Display for CryptoPAnError {
-    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        match self {
-            CryptoPAnError::CipherError(err) => write!(f, "{}", err),
-        }
-    }
-}
-
-impl From<CipherError> for CryptoPAnError {
-    fn from(err: CipherError) -> Self {
-        CryptoPAnError::CipherError(err)
-    }
-}
-
-#[derive(Debug)]
-pub enum CipherError {
-    CipherCreationFailed,
-    EncryptionUpdateFailed,
-    EncryptionFinalizeFailed,
-}
-
-impl Display for CipherError {
-    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        match self {
-            CipherError::CipherCreationFailed => write!(f, "Cipher creation failed"),
-            CipherError::EncryptionUpdateFailed => write!(f, "Encryption Update failed"),
-            CipherError::EncryptionFinalizeFailed => write!(f, "Encryption Finalize failed"),
-        }
-    }
-}
 
 pub struct CryptoPAn {
     cipher: Crypter,
@@ -48,15 +11,14 @@ pub struct CryptoPAn {
 }
 
 impl CryptoPAn {
-    pub fn new(key: &[u8; 32]) -> Result<Self, CryptoPAnError> {
+    pub fn new(key: &[u8; 32]) -> Result<Self, ErrorStack> {
         // Prepare the AES cipher for encryption.
         let mut cipher = Crypter::new(
             Cipher::aes_128_ecb(),
             Mode::Encrypt,
             &key[..16], // First 16 bytes are the AES key.
             None,       // ECB mode does not use an IV.
-        )
-        .map_err(|_| CipherError::CipherCreationFailed)?;
+        )?;
 
         // Disable padding from the crypter.
         cipher.pad(false);
@@ -68,12 +30,8 @@ impl CryptoPAn {
 
         // Encrypt the second half of the key to use as padding.
         // NOTE: `update` followed by `finalize` ensures complete encryption.
-        let mut cnt = cipher
-            .update(&key[16..], &mut padding)
-            .map_err(|_| CipherError::EncryptionUpdateFailed)?;
-        cnt += cipher
-            .finalize(&mut padding[cnt..])
-            .map_err(|_| CipherError::EncryptionFinalizeFailed)?;
+        let mut cnt = cipher.update(&key[16..], &mut padding)?;
+        cnt += cipher.finalize(&mut padding[cnt..])?;
         padding.truncate(cnt);
 
         Ok(Self {
@@ -98,7 +56,7 @@ impl CryptoPAn {
         byte_array
     }
 
-    pub fn anonymize(&mut self, addr: IpAddr) -> Result<IpAddr, CryptoPAnError> {
+    pub fn anonymize(&mut self, addr: IpAddr) -> Result<IpAddr, ErrorStack> {
         let (addr_int, version) = match addr {
             IpAddr::V4(ipv4) => (u128::from(u32::from(ipv4)), 4),
             IpAddr::V6(ipv6) => (u128::from(ipv6), 6),
@@ -121,7 +79,7 @@ impl CryptoPAn {
     ///
     /// [`anonymize()`]: CryptoPAn::anonymize()
     #[allow(dead_code)]
-    fn anonymize_str(&mut self, addr: &str) -> Result<IpAddr, CryptoPAnError> {
+    fn anonymize_str(&mut self, addr: &str) -> Result<IpAddr, ErrorStack> {
         // FIX: panicking convenience method is considered unidiomatic
         // | we should decide whether ergonomic is so important or not
         // | (O) -> make this method `pub`
@@ -132,7 +90,7 @@ impl CryptoPAn {
         self.anonymize(addr)
     }
 
-    fn anonymize_bin(&mut self, addr: u128, version: u8) -> Result<u128, CryptoPAnError> {
+    fn anonymize_bin(&mut self, addr: u128, version: u8) -> Result<u128, ErrorStack> {
         let pos_max = if version == 4 { 32 } else { 128 };
         let ext_addr = if version == 4 { addr << 96 } else { addr };
 
@@ -144,14 +102,8 @@ impl CryptoPAn {
 
             let block_size = Cipher::aes_128_ecb().block_size();
             let mut encrypted = vec![0u8; 16 + block_size];
-            let mut cnt = self
-                .cipher
-                .update(&padded_bytes, &mut encrypted)
-                .map_err(|_| CipherError::EncryptionUpdateFailed)?;
-            cnt += self
-                .cipher
-                .finalize(&mut encrypted[cnt..])
-                .map_err(|_| CipherError::EncryptionFinalizeFailed)?;
+            let mut cnt = self.cipher.update(&padded_bytes, &mut encrypted)?;
+            cnt += self.cipher.finalize(&mut encrypted[cnt..])?;
             encrypted.truncate(cnt);
 
             flip_array.push(encrypted[0] >> 7);
@@ -185,7 +137,7 @@ mod tests {
         \x62\x57\x4c\x2d\x2a\x84\x22\x02\
     ";
 
-    fn run_test_cases(cases: &[(&str, &str)]) -> Result<(), CryptoPAnError> {
+    fn run_test_cases(cases: &[(&str, &str)]) -> Result<(), ErrorStack> {
         let mut pancake = CryptoPAn::new(KEY)?;
         for (addr, expected) in cases {
             let anonymized = pancake.anonymize_str(addr)?;
@@ -197,7 +149,7 @@ mod tests {
     }
 
     #[test]
-    fn test_anonymize_ipv4_full() -> Result<(), CryptoPAnError> {
+    fn test_anonymize_ipv4_full() -> Result<(), ErrorStack> {
         let cases = [
             ("128.11.68.132", "135.242.180.132"),
             ("129.118.74.4", "134.136.186.123"),
@@ -275,7 +227,7 @@ mod tests {
     }
 
     #[test]
-    fn test_anonymize_ipv6_partial() -> Result<(), CryptoPAnError> {
+    fn test_anonymize_ipv6_partial() -> Result<(), ErrorStack> {
         let cases = [
             ("::1", "78ff:f001:9fc0:20df:8380:b1f1:704:ed"),
             ("::2", "78ff:f001:9fc0:20df:8380:b1f1:704:ef"),
