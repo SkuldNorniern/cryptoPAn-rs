@@ -1,6 +1,6 @@
 use std::{
     fmt::{self, Display, Formatter},
-    net::{AddrParseError, IpAddr, Ipv4Addr, Ipv6Addr},
+    net::{IpAddr, Ipv4Addr, Ipv6Addr},
 };
 
 // FEAT: LATER: add support for RustCrypto's AES Implementation as a backend via feature flag
@@ -9,14 +9,12 @@ use openssl::symm::{Cipher, Crypter, Mode};
 #[derive(Debug)]
 pub enum CryptoPAnError {
     CipherError(CipherError),
-    AddressParseError(AddrParseError),
 }
 
 impl Display for CryptoPAnError {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         match self {
             CryptoPAnError::CipherError(err) => write!(f, "{}", err),
-            CryptoPAnError::AddressParseError(err) => write!(f, "{}", err),
         }
     }
 }
@@ -24,12 +22,6 @@ impl Display for CryptoPAnError {
 impl From<CipherError> for CryptoPAnError {
     fn from(err: CipherError) -> Self {
         CryptoPAnError::CipherError(err)
-    }
-}
-
-impl From<AddrParseError> for CryptoPAnError {
-    fn from(err: AddrParseError) -> Self {
-        CryptoPAnError::AddressParseError(err)
     }
 }
 
@@ -117,6 +109,29 @@ impl CryptoPAn {
         Ok(Self::format_ip(anonymized, version))
     }
 
+    /// Anonymizes an IP address string while preserving the subnet structure.
+    ///
+    /// This is a convenience method over [`anonymize()`] to accept formatted IP string
+    /// instead of an [`IpAddr`]. If there is a possibility of invalid inputs, [`anonymize()`]
+    /// should be prefered in order to handle parsing failure.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the input string is not a correctly formatted IPv4 or IPv6 address.
+    ///
+    /// [`anonymize()`]: CryptoPAn::anonymize()
+    #[allow(dead_code)]
+    fn anonymize_str(&mut self, addr: &str) -> Result<IpAddr, CryptoPAnError> {
+        // FIX: panicking convenience method is considered unidiomatic
+        // | we should decide whether ergonomic is so important or not
+        // | (O) -> make this method `pub`
+        // | (X) -> move this method to the test module
+        let addr: IpAddr = addr
+            .parse()
+            .expect("input string should be a valid IPv4 or IPv6 address");
+        self.anonymize(addr)
+    }
+
     fn anonymize_bin(&mut self, addr: u128, version: u8) -> Result<u128, CryptoPAnError> {
         let pos_max = if version == 4 { 32 } else { 128 };
         let ext_addr = if version == 4 { addr << 96 } else { addr };
@@ -163,12 +178,14 @@ mod tests {
 
     fn run_key_test(addr: &str, expected: &str) {
         // Following key is the key used in the original crypto-pan source distribution code.
+        //
         let mut cp = CryptoPAn::new(&[
             21, 34, 23, 141, 51, 164, 207, 128, 19, 10, 91, 22, 73, 144, 125, 16, 216, 152, 143,
             131, 121, 121, 101, 39, 98, 87, 76, 45, 42, 132, 34, 2,
         ])
         .unwrap();
-        let anonymized = cp.anonymize(addr.parse().unwrap()).unwrap();
+
+        let anonymized = cp.anonymize_str(addr).unwrap();
         assert_eq!(anonymized.to_string(), expected);
     }
 
