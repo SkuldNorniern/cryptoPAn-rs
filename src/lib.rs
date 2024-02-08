@@ -176,21 +176,28 @@ impl CryptoPAn {
 mod tests {
     use super::*;
 
-    fn run_key_test(addr: &str, expected: &str) {
-        // Following key is the key used in the original crypto-pan source distribution code.
-        //
-        let mut cp = CryptoPAn::new(&[
-            21, 34, 23, 141, 51, 164, 207, 128, 19, 10, 91, 22, 73, 144, 125, 16, 216, 152, 143,
-            131, 121, 121, 101, 39, 98, 87, 76, 45, 42, 132, 34, 2,
-        ])
-        .unwrap();
+    // The encryption key and sample data are from the C++ reference implementation.
+    // https://web.archive.org/web/20180908092841/https://www.cc.gatech.edu/computing/Telecomm/projects/cryptopan/
+    const KEY: &[u8; 32] = b"\
+        \x15\x22\x17\x8d\x33\xa4\xcf\x80\
+        \x13\x0a\x5b\x16\x49\x90\x7d\x10\
+        \xd8\x98\x8f\x83\x79\x79\x65\x27\
+        \x62\x57\x4c\x2d\x2a\x84\x22\x02\
+    ";
 
-        let anonymized = cp.anonymize_str(addr).unwrap();
-        assert_eq!(anonymized.to_string(), expected);
+    fn run_test_cases(cases: &[(&str, &str)]) -> Result<(), CryptoPAnError> {
+        let mut pancake = CryptoPAn::new(KEY)?;
+        for (addr, expected) in cases {
+            let anonymized = pancake.anonymize_str(addr)?;
+            let expected: IpAddr = expected.parse().unwrap();
+            assert_eq!(anonymized, expected);
+        }
+
+        Ok(())
     }
 
     #[test]
-    fn test_anonymize_ipv4_full() {
+    fn test_anonymize_ipv4_full() -> Result<(), CryptoPAnError> {
         let cases = [
             ("128.11.68.132", "135.242.180.132"),
             ("129.118.74.4", "134.136.186.123"),
@@ -264,13 +271,11 @@ mod tests {
             ("64.39.15.238", "0.219.7.41"),
         ];
 
-        for (addr, expected) in cases {
-            run_key_test(addr, expected);
-        }
+        run_test_cases(&cases)
     }
 
     #[test]
-    fn test_anonymize_ipv6_partial() {
+    fn test_anonymize_ipv6_partial() -> Result<(), CryptoPAnError> {
         let cases = [
             ("::1", "78ff:f001:9fc0:20df:8380:b1f1:704:ed"),
             ("::2", "78ff:f001:9fc0:20df:8380:b1f1:704:ef"),
@@ -279,8 +284,6 @@ mod tests {
             ("2001:db8::2", "4401:2bc:603f:d91d:27f:ff8e:e6f1:dc1c"),
         ];
 
-        for (addr, expected) in cases {
-            run_key_test(addr, expected);
-        }
+        run_test_cases(&cases)
     }
 }
