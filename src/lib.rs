@@ -1,15 +1,19 @@
-use openssl::symm::{Cipher, Crypter, Mode};
+use std::{
+    fmt::{self, Display, Formatter},
+    net::{AddrParseError, IpAddr, Ipv4Addr, Ipv6Addr},
+};
 
 // FEAT: LATER: add support for RustCrypto's AES Implementation as a backend via feature flag
-use std::net::{AddrParseError, IpAddr, Ipv4Addr, Ipv6Addr};
+use openssl::symm::{Cipher, Crypter, Mode};
 
 #[derive(Debug)]
 pub enum CryptoPAnError {
     CipherError(CipherError),
     AddressParseError(AddrParseError),
 }
-impl std::fmt::Display for CryptoPAnError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+
+impl Display for CryptoPAnError {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         match self {
             CryptoPAnError::CipherError(err) => write!(f, "{}", err),
             CryptoPAnError::AddressParseError(err) => write!(f, "{}", err),
@@ -35,8 +39,9 @@ pub enum CipherError {
     EncryptionUpdateFailed,
     EncryptionFinalizeFailed,
 }
-impl std::fmt::Display for CipherError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+
+impl Display for CipherError {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         match self {
             CipherError::CipherCreationFailed => write!(f, "Cipher creation failed"),
             CipherError::EncryptionUpdateFailed => write!(f, "Encryption Update failed"),
