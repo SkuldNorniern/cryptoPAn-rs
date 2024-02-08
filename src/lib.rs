@@ -6,37 +6,37 @@ use openssl::{
 };
 
 pub struct CryptoPAn {
-    cipher: Crypter,
-    padding_int: u128,
+    crypter: Crypter,
+    padding: u128,
 }
 
 impl CryptoPAn {
     pub fn new(key: &[u8; 32]) -> Result<Self, ErrorStack> {
-        // Prepare the AES cipher for encryption.
-        let mut cipher = Crypter::new(
+        let (aes_key, pad_key) = key.split_at(16);
+
+        // 1. Initialize an AES encrypter with the first half of the key.
+        let mut crypter = Crypter::new(
             Cipher::aes_128_ecb(),
             Mode::Encrypt,
-            &key[..16], // First 16 bytes are the AES key.
-            None,       // ECB mode does not use an IV.
+            aes_key,
+            None, // ECB mode does not need an initialization vector.
         )?;
+        crypter.pad(false);
 
-        // Disable padding from the crypter.
-        cipher.pad(false);
+        // NOTE: The output buffer of `Crypter::update()` must be bigger than
+        // | the input buffer's size + the cipher's block size. In this case,
+        // | `pad_key.len() == 16`, `Cipher::aes_128_ecb().block_size() == 16`.
+        let mut padding = [0; 16 + 16];
 
-        // Correctly size the buffer for the output of the encryption operation.
-        // The AES block size is 16 bytes, so the output will also be 16 bytes.
-        let block_size = Cipher::aes_128_ecb().block_size();
-        let mut padding = vec![0; 16 + block_size]; // Output buffer sized to 16 bytes.
-
-        // Encrypt the second half of the key to use as padding.
-        // NOTE: `update` followed by `finalize` ensures complete encryption.
-        let mut cnt = cipher.update(&key[16..], &mut padding)?;
-        cnt += cipher.finalize(&mut padding[cnt..])?;
-        padding.truncate(cnt);
+        // 2. Generate a padding by encrypting the second half of the key.
+        let mut cnt = 0;
+        cnt += crypter.update(pad_key, &mut padding)?;
+        cnt += crypter.finalize(&mut padding[cnt..])?;
+        let padding = &padding[..cnt];
 
         Ok(Self {
-            cipher,
-            padding_int: Self::to_int(&padding),
+            crypter,
+            padding: Self::to_int(padding),
         })
     }
 
@@ -96,14 +96,14 @@ impl CryptoPAn {
 
         let mut flip_array = Vec::new();
         for pos in 0..pos_max {
-            let mask = !0u128 >> pos;
-            let padded_addr = (self.padding_int & mask) | (ext_addr & !mask);
+            let mask = u128::MAX >> pos;
+            let padded_addr = (self.padding & mask) | (ext_addr & !mask);
             let padded_bytes = self.to_array(padded_addr, 16);
 
             let block_size = Cipher::aes_128_ecb().block_size();
             let mut encrypted = vec![0u8; 16 + block_size];
-            let mut cnt = self.cipher.update(&padded_bytes, &mut encrypted)?;
-            cnt += self.cipher.finalize(&mut encrypted[cnt..])?;
+            let mut cnt = self.crypter.update(&padded_bytes, &mut encrypted)?;
+            cnt += self.crypter.finalize(&mut encrypted[cnt..])?;
             encrypted.truncate(cnt);
 
             flip_array.push(encrypted[0] >> 7);
