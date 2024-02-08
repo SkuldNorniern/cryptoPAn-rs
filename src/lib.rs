@@ -32,28 +32,13 @@ impl CryptoPAn {
         let mut cnt = 0;
         cnt += crypter.update(pad_key, &mut padding)?;
         cnt += crypter.finalize(&mut padding[cnt..])?;
-        let padding = &padding[..cnt];
 
-        Ok(Self {
-            crypter,
-            padding: Self::to_int(padding),
-        })
-    }
+        let padding: [u8; 16] = padding[..cnt]
+            .try_into()
+            .expect("exactly 16B should be written because (input size == block size == 16)");
+        let padding = u128::from_be_bytes(padding);
 
-    // Convert a byte array to a u64 value.
-    fn to_int(byte_array: &[u8]) -> u128 {
-        byte_array
-            .iter()
-            .fold(0u128, |acc, &byte| (acc << 8) | u128::from(byte))
-    }
-
-    // Convert a u64 value to a byte array.
-    fn to_array(&self, int_value: u128, int_value_len: usize) -> Vec<u8> {
-        let mut byte_array: Vec<u8> = Vec::with_capacity(int_value_len);
-        for i in 0..int_value_len {
-            byte_array.insert(0, ((int_value >> (i * 8)) & 0xff) as u8);
-        }
-        byte_array
+        Ok(Self { crypter, padding })
     }
 
     pub fn anonymize(&mut self, addr: IpAddr) -> Result<IpAddr, ErrorStack> {
@@ -91,15 +76,21 @@ impl CryptoPAn {
     }
 
     fn anonymize_bin(&mut self, addr: u128, version: u8) -> Result<u128, ErrorStack> {
-        let pos_max = if version == 4 { 32 } else { 128 };
-        let ext_addr = if version == 4 { addr << 96 } else { addr };
+        // REFACTOR: add `anonymize_bytes()`, accepting any `&[u8; N]` where N <= 16
+        let (pos_max, ext_addr) = match version {
+            4 => (32, addr << 96),
+            6 => (128, addr),
+            _ => unreachable!(),
+        };
 
         let mut flip_array = Vec::new();
         for pos in 0..pos_max {
             let mask = u128::MAX >> pos;
             let padded_addr = (self.padding & mask) | (ext_addr & !mask);
-            let padded_bytes = self.to_array(padded_addr, 16);
+            let padded_bytes = padded_addr.to_be_bytes();
 
+            // REFACTOR: factor out encrypting 16B part
+            // | this exact same logic is being repeated in `new()`
             let block_size = Cipher::aes_128_ecb().block_size();
             let mut encrypted = vec![0u8; 16 + block_size];
             let mut cnt = self.crypter.update(&padded_bytes, &mut encrypted)?;
