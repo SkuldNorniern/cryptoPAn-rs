@@ -77,13 +77,13 @@ impl<E: Encrypter> Scrambler<E> {
         Self { encrypter, padding }
     }
 
-    pub fn scramble(&self, bytes: &[u8; 16], n_bits: usize) -> [u8; 16] {
+    pub fn scramble(&self, bytes: &[u8; 16], n_bits: usize, pass_bits: usize) -> [u8; 16] {
         if n_bits > 128 {
             panic!("`n_bits` should be less than 128");
         }
 
         let mut result: [u8; 16] = [0; 16];
-        for i in 0..n_bits {
+        for i in pass_bits..n_bits {
             // first `i` bits from `bytes`, the rest from `padding`
             // padded = (bytes & !mask) | (self.padding & mask)
             let padded = {
@@ -112,7 +112,9 @@ impl<E: Encrypter> Scrambler<E> {
         let mut bytes = [0; 16];
         bytes[..4].copy_from_slice(&addr.octets());
 
-        let anonymized = self.scramble(&bytes, 32);
+        // FEAT: ASAP: calculate pass_bits based on ip class
+        // match bytes[0] {}
+        let anonymized = self.scramble(&bytes, 32, 0);
         let truncated: [u8; 4] = anonymized[..4].try_into().unwrap();
 
         truncated.into()
@@ -120,7 +122,7 @@ impl<E: Encrypter> Scrambler<E> {
 
     pub fn scramble_ipv6(&self, addr: Ipv6Addr) -> Ipv6Addr {
         let bytes = addr.octets();
-        self.scramble(&bytes, 128).into()
+        self.scramble(&bytes, 128, 0).into()
     }
 }
 
