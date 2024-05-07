@@ -1,4 +1,7 @@
-use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
+use std::{
+    array,
+    net::{IpAddr, Ipv4Addr, Ipv6Addr},
+};
 
 /// Merges 2 arrays of same length into 1 using a given closure.
 ///
@@ -7,10 +10,23 @@ fn zip_with<F, const N: usize>(a: &[u8; N], b: &[u8; N], f: F) -> [u8; N]
 where
     F: Fn(u8, u8) -> u8,
 {
-    std::array::from_fn(|i| unsafe {
+    array::from_fn(|i| unsafe {
         let a = a.get_unchecked(i);
         let b = b.get_unchecked(i);
         f(*a, *b)
+    })
+}
+
+/// Creates a bitmask with specified amount of leading zeros and the rest set to 1.
+fn bitmask<const N: usize>(zero_bits: usize) -> [u8; N] {
+    array::from_fn(|i| {
+        if i < zero_bits / 8 {
+            0b00000000
+        } else if i == zero_bits / 8 {
+            0b11111111 >> (zero_bits % 8)
+        } else {
+            0b11111111
+        }
     })
 }
 
@@ -66,21 +82,20 @@ impl<E: Encrypter> Scrambler<E> {
             panic!("`n_bits` should be less than 128");
         }
 
-        let mut mask: [u8; 16] = [0b11111111; 16];
         let mut result: [u8; 16] = [0; 16];
-
         for i in 0..n_bits {
+            // first `i` bits from `bytes`, the rest from `padding`
             // padded = (bytes & !mask) | (self.padding & mask)
-            // first `i - 1` bits from `bytes`, the rest from `padding`
             let padded = {
+                let mask = bitmask(i);
                 let bytes = zip_with(&mask, bytes, |m, b| !m & b);
                 let padding = zip_with(&mask, &self.padding, |m, p| m & p);
                 zip_with(&bytes, &padding, |b, p| b | p)
             };
-            let encrypted = self.encrypter.encrypt(&padded);
 
-            result[i / 8] = (result[i / 8] << 1) | (encrypted[0] >> 7);
-            mask[i / 8] >>= 1;
+            // put the first bit of the encrypted to the `i`th bit of the result
+            let encrypted = self.encrypter.encrypt(&padded);
+            result[i / 8] |= (encrypted[0] & 0b10000000) >> (i % 8);
         }
 
         zip_with(bytes, &result, |b, r| b ^ r)
@@ -106,5 +121,16 @@ impl<E: Encrypter> Scrambler<E> {
     pub fn scramble_ipv6(&self, addr: Ipv6Addr) -> Ipv6Addr {
         let bytes = addr.octets();
         self.scramble(&bytes, 128).into()
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+
+    #[test]
+    fn test_bitmask() {
+        let mask: [u8; 2] = bitmask(9);
+        assert_eq!(mask, [0b00000000, 0b01111111]);
     }
 }
