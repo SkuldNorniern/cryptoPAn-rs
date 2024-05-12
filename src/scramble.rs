@@ -112,9 +112,17 @@ impl<E: Encrypter> Scrambler<E> {
         let mut bytes = [0; 16];
         bytes[..4].copy_from_slice(&addr.octets());
 
-        // FEAT: ASAP: calculate pass_bits based on ip class
-        // match bytes[0] {}
-        let anonymized = self.scramble(&bytes, 32, 0);
+        // this amount of bits will be left unanonymized;
+        // preserving the exact same class prefix from the original addr
+        let pass_bits = match addr.octets()[0] >> 4 {
+            0b0000..=0b0111 => 1, // class A: 0b0...
+            0b1000..=0b1011 => 2, // class B: 0b10..
+            0b1100..=0b1101 => 3, // class C: 0b110.
+            0b1110..=0b1110 => 4, // class D: 0b1110
+            _ => return addr, // class E: 0b1111 - do not anonymize
+        };
+
+        let anonymized = self.scramble(&bytes, 32, pass_bits);
         let truncated: [u8; 4] = anonymized[..4].try_into().unwrap();
 
         truncated.into()
