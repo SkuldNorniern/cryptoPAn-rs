@@ -77,13 +77,13 @@ impl<E: Encrypter> Scrambler<E> {
         Self { encrypter, padding }
     }
 
-    pub fn scramble(&self, bytes: &[u8; 16], n_bits: usize, pass_bits: usize) -> [u8; 16] {
-        if n_bits > 128 {
-            panic!("`n_bits` should be less than 128");
+    pub fn scramble(&self, bytes: &[u8; 16], skip_bits: usize, max_bits: usize) -> [u8; 16] {
+        if max_bits > 128 {
+            panic!("`max_bits` should be less than 128");
         }
 
         let mut result: [u8; 16] = [0; 16];
-        for i in pass_bits..n_bits {
+        for i in skip_bits..max_bits {
             // first `i` bits from `bytes`, the rest from `padding`
             // padded = (bytes & !mask) | (self.padding & mask)
             let padded = {
@@ -114,15 +114,15 @@ impl<E: Encrypter> Scrambler<E> {
 
         // this amount of bits will be left unanonymized;
         // preserving the exact same class prefix from the original addr
-        let pass_bits = match addr.octets()[0] >> 4 {
+        let skip_bits = match addr.octets()[0] >> 4 {
             0b0000..=0b0111 => 1, // class A: 0b0...
             0b1000..=0b1011 => 2, // class B: 0b10..
             0b1100..=0b1101 => 3, // class C: 0b110.
             0b1110..=0b1110 => 4, // class D: 0b1110
-            _ => return addr, // class E: 0b1111 - do not anonymize
+            _ => return addr,     // class E: 0b1111 - do not anonymize
         };
 
-        let anonymized = self.scramble(&bytes, 32, pass_bits);
+        let anonymized = self.scramble(&bytes, skip_bits, 32);
         let truncated: [u8; 4] = anonymized[..4].try_into().unwrap();
 
         truncated.into()
@@ -130,7 +130,7 @@ impl<E: Encrypter> Scrambler<E> {
 
     pub fn scramble_ipv6(&self, addr: Ipv6Addr) -> Ipv6Addr {
         let bytes = addr.octets();
-        self.scramble(&bytes, 128, 0).into()
+        self.scramble(&bytes, 0, 128).into()
     }
 }
 
