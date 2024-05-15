@@ -1,6 +1,7 @@
 use std::{
     array,
     net::{IpAddr, Ipv4Addr, Ipv6Addr},
+    ops::Range,
 };
 
 /// Merges 2 arrays of same length into 1 using a given closure.
@@ -77,20 +78,20 @@ impl<E: Encrypter> Scrambler<E> {
         Self { encrypter, padding }
     }
 
-    pub fn scramble(&self, bytes: &[u8; 16], skip_bits: usize, max_bits: usize) -> [u8; 16] {
-        if max_bits > 128 {
+    pub fn scramble(&self, bits: &[u8; 16], rng: Range<usize>) -> [u8; 16] {
+        if rng.end > 128 {
             panic!("`max_bits` should be less than 128");
         }
 
         let mut result: [u8; 16] = [0; 16];
-        for i in skip_bits..max_bits {
-            // first `i` bits from `bytes`, the rest from `padding`
-            // padded = (bytes & !mask) | (self.padding & mask)
+        for i in rng {
+            // first `i` bits from `bits`, the rest from `padding`
+            // padded = (bits & !mask) | (self.padding & mask)
             let padded = {
                 let mask = bitmask(i);
-                let bytes = zip_with(&mask, bytes, |m, b| !m & b);
+                let bits = zip_with(&mask, bits, |m, b| !m & b);
                 let padding = zip_with(&mask, &self.padding, |m, p| m & p);
-                zip_with(&bytes, &padding, |b, p| b | p)
+                zip_with(&bits, &padding, |b, p| b | p)
             };
 
             // put the first bit of the encrypted to the `i`th bit of the result
@@ -98,7 +99,7 @@ impl<E: Encrypter> Scrambler<E> {
             result[i / 8] |= (encrypted[0] & 0b10000000) >> (i % 8);
         }
 
-        zip_with(bytes, &result, |b, r| b ^ r)
+        zip_with(bits, &result, |b, r| b ^ r)
     }
 
     pub fn scramble_ip(&self, addr: IpAddr) -> IpAddr {
@@ -113,7 +114,7 @@ impl<E: Encrypter> Scrambler<E> {
         let mut bytes = [0; 16];
         bytes[..4].copy_from_slice(&addr.octets());
 
-        let anonymized = self.scramble(&bytes, 0, 32);
+        let anonymized = self.scramble(&bytes, 0..32);
         let truncated: [u8; 4] = anonymized[..4].try_into().unwrap();
 
         truncated.into()
@@ -121,7 +122,7 @@ impl<E: Encrypter> Scrambler<E> {
 
     pub fn scramble_ipv6(&self, addr: Ipv6Addr) -> Ipv6Addr {
         let bytes = addr.octets();
-        self.scramble(&bytes, 0, 128).into()
+        self.scramble(&bytes, 0..128).into()
     }
 }
 
